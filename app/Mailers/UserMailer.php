@@ -11,6 +11,10 @@ class FreshRSS_User_Mailer extends Minz_Mailer {
 	 */
 	protected $view;
 
+	public function __construct() {
+		parent::__construct(FreshRSS_View::class);
+	}
+
 	public function send_email_need_validation(string $username, FreshRSS_UserConfiguration $user_config): bool {
 		Minz_Translate::reset($user_config->language);
 
@@ -34,7 +38,7 @@ class FreshRSS_User_Mailer extends Minz_Mailer {
 		$subject_prefix = '[' . FreshRSS_Context::systemConf()->title . ']';
 		return $this->mail(
 			$user_config->mail_login,
-			$subject_prefix . ' ' ._t('user.mailer.email_need_validation.title')
+			$subject_prefix . ' ' . _t('user.mailer.email_need_validation.title')
 		);
 	}
 }

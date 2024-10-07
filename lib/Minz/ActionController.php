@@ -9,7 +9,7 @@ declare(strict_types=1);
 /**
  * The Minz_ActionController class is a controller in the MVC paradigm
  */
-class Minz_ActionController {
+abstract class Minz_ActionController {
 
 	/** @var array<string,string> */
 	private static array $csp_default = [
@@ -51,7 +51,7 @@ class Minz_ActionController {
 		$this->view = $view ?? new Minz_View();
 		$view_path = Minz_Request::controllerName() . '/' . Minz_Request::actionName() . '.phtml';
 		$this->view->_path($view_path);
-		$this->view->attributeParams ();
+		$this->view->attributeParams();
 	}
 
 	/**
@@ -99,6 +99,9 @@ class Minz_ActionController {
 	 */
 	public function declareCspHeader(): void {
 		$policies = [];
+		foreach (Minz_ExtensionManager::listExtensions(true) as $extension) {
+			$extension->amendCsp($this->csp_policies);
+		}
 		foreach ($this->csp_policies as $directive => $sources) {
 			$policies[] = $directive . ' ' . $sources;
 		}

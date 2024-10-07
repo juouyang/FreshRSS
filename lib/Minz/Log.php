@@ -39,21 +39,21 @@ class Minz_Log {
 			}
 
 			switch ($level) {
-			case LOG_ERR :
-				$level_label = 'error';
-				break;
-			case LOG_WARNING :
-				$level_label = 'warning';
-				break;
-			case LOG_NOTICE :
-				$level_label = 'notice';
-				break;
-			case LOG_DEBUG :
-				$level_label = 'debug';
-				break;
-			default :
-				$level = LOG_INFO;
-				$level_label = 'info';
+				case LOG_ERR:
+					$level_label = 'error';
+					break;
+				case LOG_WARNING:
+					$level_label = 'warning';
+					break;
+				case LOG_NOTICE:
+					$level_label = 'notice';
+					break;
+				case LOG_DEBUG:
+					$level_label = 'debug';
+					break;
+				default:
+					$level = LOG_INFO;
+					$level_label = 'info';
 			}
 
 			$log = '[' . date('r') . '] [' . $level_label . '] --- ' . $information . "\n";
@@ -102,16 +102,20 @@ class Minz_Log {
 	/**
 	 * Some helpers to Minz_Log::record() method
 	 * Parameters are the same of those of the record() method.
+	 * @throws Minz_PermissionDeniedException
 	 */
 	public static function debug(string $msg, ?string $file_name = null): void {
 		self::record($msg, LOG_DEBUG, $file_name);
 	}
+	/** @throws Minz_PermissionDeniedException */
 	public static function notice(string $msg, ?string $file_name = null): void {
 		self::record($msg, LOG_NOTICE, $file_name);
 	}
+	/** @throws Minz_PermissionDeniedException */
 	public static function warning(string $msg, ?string $file_name = null): void {
 		self::record($msg, LOG_WARNING, $file_name);
 	}
+	/** @throws Minz_PermissionDeniedException */
 	public static function error(string $msg, ?string $file_name = null): void {
 		self::record($msg, LOG_ERR, $file_name);
 	}

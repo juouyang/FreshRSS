@@ -10,11 +10,11 @@ final class FreshRSS_Context {
 	/**
 	 * @var array<int,FreshRSS_Category>
 	 */
-	public static array $categories = [];
+	private static array $categories = [];
 	/**
 	 * @var array<int,FreshRSS_Tag>
 	 */
-	public static array $tags = [];
+	private static array $tags = [];
 	public static string $name = '';
 	public static string $description = '';
 	public static int $total_unread = 0;
@@ -47,6 +47,7 @@ final class FreshRSS_Context {
 	 */
 	public static string $order = 'DESC';
 	public static int $number = 0;
+	public static int $offset = 0;
 	public static FreshRSS_BooleanSearch $search;
 	public static string $first_id = '';
 	public static string $next_id = '';
@@ -75,6 +76,9 @@ final class FreshRSS_Context {
 		}
 	}
 
+	/**
+	 * @throws FreshRSS_Context_Exception
+	 */
 	public static function &systemConf(): FreshRSS_SystemConfiguration {
 		if (FreshRSS_Context::$system_conf === null) {
 			throw new FreshRSS_Context_Exception('System configuration not initialised!');
@@ -88,7 +92,6 @@ final class FreshRSS_Context {
 
 	/**
 	 * Initialize the context for the current user.
-	 * @throws Minz_ConfigurationParamException
 	 */
 	public static function initUser(string $username = '', bool $userMustExist = true): void {
 		FreshRSS_Context::$user_conf = null;
@@ -153,6 +156,9 @@ final class FreshRSS_Context {
 		}
 	}
 
+	/**
+	 * @throws FreshRSS_Context_Exception
+	 */
 	public static function &userConf(): FreshRSS_UserConfiguration {
 		if (FreshRSS_Context::$user_conf === null) {
 			throw new FreshRSS_Context_Exception('User configuration not initialised!');
@@ -168,10 +174,33 @@ final class FreshRSS_Context {
 		FreshRSS_Context::$user_conf = null;
 	}
 
+	/** @return array<int,FreshRSS_Category> */
+	public static function categories(): array {
+		if (empty(self::$categories)) {
+			$catDAO = FreshRSS_Factory::createCategoryDao();
+			self::$categories = $catDAO->listSortedCategories(true, false);
+		}
+		return self::$categories;
+	}
+
+	/** @return array<int,FreshRSS_Feed> */
+	public static function feeds(): array {
+		return FreshRSS_Category::findFeeds(self::categories());
+	}
+
+	/** @return array<int,FreshRSS_Tag> */
+	public static function labels(bool $precounts = false): array {
+		if (empty(self::$tags) || $precounts) {
+			$tagDAO = FreshRSS_Factory::createTagDao();
+			self::$tags = $tagDAO->listTags($precounts) ?: [];
+		}
+		return self::$tags;
+	}
+
 	/**
 	 * This action updates the Context object by using request parameters.
 	 *
-	 * Parameters are:
+	 * HTTP GET request parameters are:
 	 *   - state (default: conf->default_view)
 	 *   - search (default: empty string)
 	 *   - order (default: conf->sort_order)
@@ -182,17 +211,14 @@ final class FreshRSS_Context {
 	 * @throws Minz_ConfigurationNamespaceException
 	 * @throws Minz_PDOConnectionException
 	 */
-	public static function updateUsingRequest(): void {
-		if (empty(self::$categories)) {
-			$catDAO = FreshRSS_Factory::createCategoryDao();
-			self::$categories = $catDAO->listSortedCategories();
+	public static function updateUsingRequest(bool $computeStatistics): void {
+		if ($computeStatistics && self::$total_unread === 0) {
+			// Update number of read / unread variables.
+			$entryDAO = FreshRSS_Factory::createEntryDao();
+			self::$total_starred = $entryDAO->countUnreadReadFavorites();
+			self::$total_unread = FreshRSS_Category::countUnread(self::categories(), FreshRSS_Feed::PRIORITY_MAIN_STREAM);
+			self::$total_important_unread = FreshRSS_Category::countUnread(self::categories(), FreshRSS_Feed::PRIORITY_IMPORTANT);
 		}
-
-		// Update number of read / unread variables.
-		$entryDAO = FreshRSS_Factory::createEntryDao();
-		self::$total_starred = $entryDAO->countUnreadReadFavorites();
-		self::$total_unread = FreshRSS_CategoryDAO::countUnread(self::$categories, FreshRSS_Feed::PRIORITY_MAIN_STREAM);
-		self::$total_important_unread = FreshRSS_CategoryDAO::countUnread(self::$categories, FreshRSS_Feed::PRIORITY_IMPORTANT);
 
 		self::_get(Minz_Request::paramString('get') ?: 'a');
 
@@ -219,6 +245,7 @@ final class FreshRSS_Context {
 				FreshRSS_Context::userConf()->max_posts_per_rss,
 				FreshRSS_Context::userConf()->posts_per_page);
 		}
+		self::$offset = Minz_Request::paramInt('offset');
 		self::$first_id = Minz_Request::paramString('next');
 		self::$sinceHours = Minz_Request::paramInt('hours');
 	}
@@ -320,23 +347,23 @@ final class FreshRSS_Context {
 		$type = substr($get, 0, 1);
 		$id = substr($get, 2);
 
-		switch($type) {
-		case 'a':
-			return self::$current_get['all'];
-		case 'i':
-			return self::$current_get['important'];
-		case 's':
-			return self::$current_get['starred'];
-		case 'f':
-			return self::$current_get['feed'] == $id;
-		case 'c':
-			return self::$current_get['category'] == $id;
-		case 't':
-			return self::$current_get['tag'] == $id;
-		case 'T':
-			return self::$current_get['tags'] || self::$current_get['tag'];
-		default:
-			return false;
+		switch ($type) {
+			case 'a':
+				return self::$current_get['all'];
+			case 'i':
+				return self::$current_get['important'];
+			case 's':
+				return self::$current_get['starred'];
+			case 'f':
+				return self::$current_get['feed'] == $id;
+			case 'c':
+				return self::$current_get['category'] == $id;
+			case 't':
+				return self::$current_get['tag'] == $id;
+			case 'T':
+				return self::$current_get['tags'] || self::$current_get['tag'];
+			default:
+				return false;
 		}
 	}
 
@@ -362,87 +389,88 @@ final class FreshRSS_Context {
 
 		if (empty(self::$categories)) {
 			$catDAO = FreshRSS_Factory::createCategoryDao();
-			self::$categories = $catDAO->listCategories(true);
+			$details = $type === 'f'; 	// Load additional feed details in the case of feed view
+			self::$categories = $catDAO->listCategories(true, $details);
 		}
 
-		switch($type) {
-		case 'a':
-			self::$current_get['all'] = true;
-			self::$name = _t('index.feed.title');
-			self::$description = FreshRSS_Context::systemConf()->meta_description;
-			self::$get_unread = self::$total_unread;
-			break;
-		case 'i':
-			self::$current_get['important'] = true;
-			self::$name = _t('index.menu.important');
-			self::$description = FreshRSS_Context::systemConf()->meta_description;
-			self::$get_unread = self::$total_unread;
-			break;
-		case 's':
-			self::$current_get['starred'] = true;
-			self::$name = _t('index.feed.title_fav');
-			self::$description = FreshRSS_Context::systemConf()->meta_description;
-			self::$get_unread = self::$total_starred['unread'];
+		switch ($type) {
+			case 'a':
+				self::$current_get['all'] = true;
+				self::$name = _t('index.feed.title');
+				self::$description = FreshRSS_Context::systemConf()->meta_description;
+				self::$get_unread = self::$total_unread;
+				break;
+			case 'i':
+				self::$current_get['important'] = true;
+				self::$name = _t('index.menu.important');
+				self::$description = FreshRSS_Context::systemConf()->meta_description;
+				self::$get_unread = self::$total_unread;
+				break;
+			case 's':
+				self::$current_get['starred'] = true;
+				self::$name = _t('index.feed.title_fav');
+				self::$description = FreshRSS_Context::systemConf()->meta_description;
+				self::$get_unread = self::$total_starred['unread'];
 
-			// Update state if favorite is not yet enabled.
-			self::$state = self::$state | FreshRSS_Entry::STATE_FAVORITE;
-			break;
-		case 'f':
-			// We try to find the corresponding feed. When allowing robots, always retrieve the full feed including description
-			$feed = FreshRSS_Context::systemConf()->allow_robots ? null : FreshRSS_CategoryDAO::findFeed(self::$categories, $id);
-			if ($feed === null) {
-				$feedDAO = FreshRSS_Factory::createFeedDao();
-				$feed = $feedDAO->searchById($id);
+				// Update state if favorite is not yet enabled.
+				self::$state = self::$state | FreshRSS_Entry::STATE_FAVORITE;
+				break;
+			case 'f':
+				// We try to find the corresponding feed. When allowing robots, always retrieve the full feed including description
+				$feed = FreshRSS_Context::systemConf()->allow_robots ? null : FreshRSS_Category::findFeed(self::$categories, $id);
 				if ($feed === null) {
-					throw new FreshRSS_Context_Exception('Invalid feed: ' . $id);
+					$feedDAO = FreshRSS_Factory::createFeedDao();
+					$feed = $feedDAO->searchById($id);
+					if ($feed === null) {
+						throw new FreshRSS_Context_Exception('Invalid feed: ' . $id);
+					}
 				}
-			}
-			self::$current_get['feed'] = $id;
-			self::$current_get['category'] = $feed->categoryId();
-			self::$name = $feed->name();
-			self::$description = $feed->description();
-			self::$get_unread = $feed->nbNotRead();
-			break;
-		case 'c':
-			// We try to find the corresponding category.
-			self::$current_get['category'] = $id;
-			if (!isset(self::$categories[$id])) {
-				$catDAO = FreshRSS_Factory::createCategoryDao();
-				$cat = $catDAO->searchById($id);
-				if ($cat === null) {
-					throw new FreshRSS_Context_Exception('Invalid category: ' . $id);
+				self::$current_get['feed'] = $id;
+				self::$current_get['category'] = $feed->categoryId();
+				self::$name = $feed->name();
+				self::$description = $feed->description();
+				self::$get_unread = $feed->nbNotRead();
+				break;
+			case 'c':
+				// We try to find the corresponding category.
+				self::$current_get['category'] = $id;
+				if (!isset(self::$categories[$id])) {
+					$catDAO = FreshRSS_Factory::createCategoryDao();
+					$cat = $catDAO->searchById($id);
+					if ($cat === null) {
+						throw new FreshRSS_Context_Exception('Invalid category: ' . $id);
+					}
+					self::$categories[$id] = $cat;
+				} else {
+					$cat = self::$categories[$id];
 				}
-				//self::$categories[$id] = $cat;
-			} else {
-				$cat = self::$categories[$id];
-			}
-			self::$name = $cat->name();
-			self::$get_unread = $cat->nbNotRead();
-			break;
-		case 't':
-			// We try to find the corresponding tag.
-			self::$current_get['tag'] = $id;
-			if (!isset(self::$tags[$id])) {
+				self::$name = $cat->name();
+				self::$get_unread = $cat->nbNotRead();
+				break;
+			case 't':
+				// We try to find the corresponding tag.
+				self::$current_get['tag'] = $id;
+				if (!isset(self::$tags[$id])) {
+					$tagDAO = FreshRSS_Factory::createTagDao();
+					$tag = $tagDAO->searchById($id);
+					if ($tag === null) {
+						throw new FreshRSS_Context_Exception('Invalid tag: ' . $id);
+					}
+					self::$tags[$id] = $tag;
+				} else {
+					$tag = self::$tags[$id];
+				}
+				self::$name = $tag->name();
+				self::$get_unread = $tag->nbUnread();
+				break;
+			case 'T':
 				$tagDAO = FreshRSS_Factory::createTagDao();
-				$tag = $tagDAO->searchById($id);
-				if ($tag === null) {
-					throw new FreshRSS_Context_Exception('Invalid tag: ' . $id);
-				}
-				//self::$tags[$id] = $tag;
-			} else {
-				$tag = self::$tags[$id];
-			}
-			self::$name = $tag->name();
-			self::$get_unread = $tag->nbUnread();
-			break;
-		case 'T':
-			$tagDAO = FreshRSS_Factory::createTagDao();
-			self::$current_get['tags'] = true;
-			self::$name = _t('index.menu.tags');
-			self::$get_unread = $tagDAO->countNotRead();
-			break;
-		default:
-			throw new FreshRSS_Context_Exception('Invalid getter: ' . $get);
+				self::$current_get['tags'] = true;
+				self::$name = _t('index.menu.tags');
+				self::$get_unread = $tagDAO->countNotRead();
+				break;
+			default:
+				throw new FreshRSS_Context_Exception('Invalid getter: ' . $get);
 		}
 
 		self::_nextGet();
@@ -465,54 +493,54 @@ final class FreshRSS_Context {
 			$another_unread_id = '';
 			$found_current_get = false;
 			switch ($get[0]) {
-			case 'f':
-				// We search the next unread feed with the following priorities: next in same category, or previous in same category, or next, or previous.
-				foreach (self::$categories as $cat) {
-					$sameCat = false;
-					foreach ($cat->feeds() as $feed) {
-						if ($found_current_get) {
-							if ($feed->nbNotRead() > 0) {
+				case 'f':
+					// We search the next unread feed with the following priorities: next in same category, or previous in same category, or next, or previous.
+					foreach (self::$categories as $cat) {
+						$sameCat = false;
+						foreach ($cat->feeds() as $feed) {
+							if ($found_current_get) {
+								if ($feed->nbNotRead() > 0) {
+									$another_unread_id = $feed->id();
+									break 2;
+								}
+							} elseif ($feed->id() == self::$current_get['feed']) {
+								$found_current_get = true;
+							} elseif ($feed->nbNotRead() > 0) {
 								$another_unread_id = $feed->id();
-								break 2;
+								$sameCat = true;
 							}
-						} elseif ($feed->id() == self::$current_get['feed']) {
-							$found_current_get = true;
-						} elseif ($feed->nbNotRead() > 0) {
-							$another_unread_id = $feed->id();
-							$sameCat = true;
 						}
-					}
-					if ($found_current_get && $sameCat) {
-						break;
-					}
-				}
-
-				// If there is no more unread feed, show main stream
-				self::$next_get = $another_unread_id == '' ? 'a' : 'f_' . $another_unread_id;
-				break;
-			case 'c':
-				// We search the next category with at least one unread article.
-				foreach (self::$categories as $cat) {
-					if ($cat->id() == self::$current_get['category']) {
-						// Here is our current category! Next one could be our
-						// champion if it has unread articles.
-						$found_current_get = true;
-						continue;
-					}
-
-					if ($cat->nbNotRead() > 0) {
-						$another_unread_id = $cat->id();
-						if ($found_current_get) {
-							// Unread articles and the current category has
-							// already been found? Leave the loop!
+						if ($found_current_get && $sameCat) {
 							break;
 						}
 					}
-				}
 
-				// If there is no more unread category, show main stream
-				self::$next_get = $another_unread_id == '' ? 'a' : 'c_' . $another_unread_id;
-				break;
+					// If there is no more unread feed, show main stream
+					self::$next_get = $another_unread_id == '' ? 'a' : 'f_' . $another_unread_id;
+					break;
+				case 'c':
+					// We search the next category with at least one unread article.
+					foreach (self::$categories as $cat) {
+						if ($cat->id() == self::$current_get['category']) {
+							// Here is our current category! Next one could be our
+							// champion if it has unread articles.
+							$found_current_get = true;
+							continue;
+						}
+
+						if ($cat->nbNotRead() > 0) {
+							$another_unread_id = $cat->id();
+							if ($found_current_get) {
+								// Unread articles and the current category has
+								// already been found? Leave the loop!
+								break;
+							}
+						}
+					}
+
+					// If there is no more unread category, show main stream
+					self::$next_get = $another_unread_id == '' ? 'a' : 'c_' . $another_unread_id;
+					break;
 			}
 		}
 	}

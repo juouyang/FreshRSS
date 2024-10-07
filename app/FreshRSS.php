@@ -23,8 +23,6 @@ class FreshRSS extends Minz_FrontController {
 			Minz_Session::init('FreshRSS');
 		}
 
-		Minz_ActionController::$defaultViewType = FreshRSS_View::class;
-
 		FreshRSS_Context::initSystem();
 		if (!FreshRSS_Context::hasSystemConf()) {
 			$message = 'Error during context system init!';
@@ -76,10 +74,10 @@ class FreshRSS extends Minz_FrontController {
 			if (!FreshRSS_Context::hasSystemConf() || !(FreshRSS_Auth::isCsrfOk() ||
 				(Minz_Request::controllerName() === 'auth' && Minz_Request::actionName() === 'login') ||
 				(Minz_Request::controllerName() === 'user' && Minz_Request::actionName() === 'create' && !FreshRSS_Auth::hasAccess('admin')) ||
-				(Minz_Request::controllerName() === 'feed' && Minz_Request::actionName() === 'actualize'
-					&& FreshRSS_Context::systemConf()->allow_anonymous_refresh) ||
-				(Minz_Request::controllerName() === 'javascript' && Minz_Request::actionName() === 'actualize'
-					&& FreshRSS_Context::systemConf()->allow_anonymous)
+				(Minz_Request::controllerName() === 'feed' && Minz_Request::actionName() === 'actualize' &&
+					FreshRSS_Context::systemConf()->allow_anonymous_refresh) ||
+				(Minz_Request::controllerName() === 'javascript' && Minz_Request::actionName() === 'actualize' &&
+					FreshRSS_Context::systemConf()->allow_anonymous)
 				)) {
 				// Token-based protection against XSRF attacks, except for the login or self-create user forms
 				self::initI18n();
@@ -114,7 +112,7 @@ class FreshRSS extends Minz_FrontController {
 		}
 		$theme = FreshRSS_Themes::load(FreshRSS_Context::userConf()->theme);
 		if ($theme) {
-			foreach(array_reverse($theme['files']) as $file) {
+			foreach (array_reverse($theme['files']) as $file) {
 				switch (substr($file, -3)) {
 					case '.js':
 						$theme_id = $theme['id'];
@@ -143,7 +141,7 @@ class FreshRSS extends Minz_FrontController {
 			}
 		}
 		//Use prepend to insert before extensions. Added in reverse order.
-		if (Minz_Request::controllerName() !== 'index') {
+		if (!in_array(Minz_Request::controllerName(), ['index', ''], true)) {
 			FreshRSS_View::prependScript(Minz_Url::display('/scripts/extra.js?' . @filemtime(PUBLIC_PATH . '/scripts/extra.js')));
 		}
 		FreshRSS_View::prependScript(Minz_Url::display('/scripts/main.js?' . @filemtime(PUBLIC_PATH . '/scripts/main.js')));

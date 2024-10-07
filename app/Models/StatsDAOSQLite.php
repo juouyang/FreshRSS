@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 class FreshRSS_StatsDAOSQLite extends FreshRSS_StatsDAO {
 
+	#[\Override]
 	protected function sqlFloor(string $s): string {
 		return "CAST(($s) AS INT)";
 	}
@@ -10,6 +11,7 @@ class FreshRSS_StatsDAOSQLite extends FreshRSS_StatsDAO {
 	/**
 	 * @return array<int,int>
 	 */
+	#[\Override]
 	protected function calculateEntryRepartitionPerFeedPerPeriod(string $period, ?int $feed = null): array {
 		if ($feed) {
 			$restrict = "WHERE e.id_feed = {$feed}";
@@ -41,7 +43,7 @@ SQL;
 				$periodMax = 12;
 				break;
 			default:
-			$periodMax = 30;
+				$periodMax = 30;
 		}
 
 		$repartition = array_fill(0, $periodMax, 0);
@@ -51,5 +53,4 @@ SQL;
 
 		return $repartition;
 	}
-
 }

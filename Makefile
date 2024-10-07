@@ -40,6 +40,7 @@ start: ## Start the development environment (use Docker)
 	docker network create --driver bridge $(NETWORK) || true
 	$(foreach extension,$(extensions),$(eval volumes=$(volumes) --volume $(extension):/var/www/FreshRSS/extensions/$(notdir $(extension)):z))
 	docker run \
+		-it \
 		--rm \
 		--volume $(shell pwd):/var/www/FreshRSS:z \
 		$(volumes) \
@@ -71,7 +72,7 @@ lint-fix: vendor/bin/phpcbf ## Fix the errors detected by the linter
 
 bin/composer:
 	mkdir -p bin/
-	wget 'https://raw.githubusercontent.com/composer/getcomposer.org/a19025d6c0a1ff9fc1fac341128b2823193be462/web/installer' -O - -q | php -- --quiet --install-dir='./bin/' --filename='composer'
+	wget 'https://raw.githubusercontent.com/composer/getcomposer.org/163a517dbb7eba0eb25633061c76e648392c6738/web/installer' -O - -q | php -- --quiet --install-dir='./bin/' --filename='composer'
 
 vendor/bin/phpunit: bin/composer
 	bin/composer install --prefer-dist --no-progress
@@ -88,7 +89,7 @@ vendor/bin/phpcbf: bin/composer
 bin/typos:
 	mkdir -p bin/
 	cd bin ; \
-	wget -q 'https://github.com/crate-ci/typos/releases/download/v1.16.21/typos-v1.16.21-x86_64-unknown-linux-musl.tar.gz' && \
+	wget -q 'https://github.com/crate-ci/typos/releases/download/v1.23.1/typos-v1.23.1-x86_64-unknown-linux-musl.tar.gz' && \
 	tar -xvf *.tar.gz './typos' && \
 	chmod +x typos && \
 	rm *.tar.gz ; \

@@ -13,16 +13,12 @@ function isImgMime(string $content): bool {
 		return true;
 	}
 	$isImage = true;
-	try {
-		/** @var finfo $fInfo */
-		$fInfo = finfo_open(FILEINFO_MIME_TYPE);
-		/** @var string $content */
-		$content = finfo_buffer($fInfo, $content);
-		$isImage = strpos($content, 'image') !== false;
-		finfo_close($fInfo);
-	} catch (Exception $e) {
-		syslog(LOG_WARNING, 'FreshRSS favicon error: ' . $e->getMessage());
-	}
+	/** @var finfo $fInfo */
+	$fInfo = finfo_open(FILEINFO_MIME_TYPE);
+	/** @var string $content */
+	$content = finfo_buffer($fInfo, $content);
+	$isImage = strpos($content, 'image') !== false;
+	finfo_close($fInfo);
 	return $isImage;
 }
 
@@ -42,6 +38,7 @@ function downloadHttp(string &$url, array $curlOptions = []): string {
 			CURLOPT_MAXREDIRS => 10,
 			CURLOPT_FOLLOWLOCATION => true,
 			CURLOPT_ENCODING => '',	//Enable all encodings
+			//CURLOPT_VERBOSE => 1,	// To debug sent HTTP headers
 		]);
 
 	FreshRSS_Context::initSystem();
@@ -78,7 +75,7 @@ function searchFavicon(string &$url): string {
 	$links = $xpath->query('//link[@href][translate(@rel, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="shortcut icon"'
 		. ' or translate(@rel, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="icon"]');
 
-	if (!$links) {
+	if (!($links instanceof DOMNodeList)) {
 		return '';
 	}
 
@@ -96,7 +93,7 @@ function searchFavicon(string &$url): string {
 
 		// Handle protocol-relative URLs by adding the current URL's scheme
 		if (substr($href, 0, 2) === '//') {
-			$href = ($urlParts['scheme'] ?? 'https') . '://' . $href;
+			$href = ($urlParts['scheme'] ?? 'https') . ':' . $href;
 		}
 
 		$href = SimplePie_IRI::absolutize($baseUrl, $href);
@@ -134,4 +131,17 @@ function download_favicon(string $url, string $dest): bool {
 	}
 	return ($favicon != '' && file_put_contents($dest, $favicon) > 0) ||
 		@copy(DEFAULT_FAVICON, $dest);
+}
+
+function contentType(string $ico): string {
+	$ico_content_type = 'image/x-icon';
+	if (function_exists('mime_content_type')) {
+		$ico_content_type = mime_content_type($ico) ?: $ico_content_type;
+	}
+	switch ($ico_content_type) {
+		case 'image/svg':
+			$ico_content_type = 'image/svg+xml';
+			break;
+	}
+	return $ico_content_type;
 }

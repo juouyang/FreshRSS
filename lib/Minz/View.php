@@ -30,6 +30,7 @@ class Minz_View {
 
 	/**
 	 * Determines if a layout is used or not
+	 * @throws Minz_ConfigurationException
 	 */
 	public function __construct() {
 		$this->_layout(self::LAYOUT_DEFAULT);
@@ -42,7 +43,7 @@ class Minz_View {
 	 */
 	public function change_view(string $controller_name, string $action_name): void {
 		Minz_Log::warning('Minz_View::change_view is deprecated, it will be removed in a future version. Please use Minz_View::_path instead.');
-		$this->_path($controller_name. '/' . $action_name . '.phtml');
+		$this->_path($controller_name . '/' . $action_name . '.phtml');
 	}
 
 	/**
@@ -70,9 +71,9 @@ class Minz_View {
 	 */
 	public function build(): void {
 		if ($this->layout_filename !== '') {
-			$this->buildLayout ();
+			$this->buildLayout();
 		} else {
-			$this->render ();
+			$this->render();
 		}
 	}
 
@@ -345,8 +346,7 @@ class Minz_View {
 
 	public function attributeParams(): void {
 		foreach (Minz_View::$params as $key => $value) {
-			// TODO: Do not use variable variable (noVariableVariables)
-			/** @phpstan-ignore-next-line */
+			// @phpstan-ignore property.dynamicName
 			$this->$key = $value;
 		}
 	}

@@ -11,19 +11,17 @@ class FreshRSS_BooleanSearch {
 	private array $searches = [];
 
 	/**
-	 * @phpstan-var 'AND'|'OR'|'AND NOT'
+	 * @phpstan-var 'AND'|'OR'|'AND NOT'|'OR NOT'
 	 */
 	private string $operator;
 
-	/** @param 'AND'|'OR'|'AND NOT' $operator */
-	public function __construct(string $input, int $level = 0, string $operator = 'AND') {
+	/** @param 'AND'|'OR'|'AND NOT'|'OR NOT' $operator */
+	public function __construct(string $input, int $level = 0, string $operator = 'AND', bool $allowUserQueries = true) {
 		$this->operator = $operator;
 		$input = trim($input);
 		if ($input === '') {
 			return;
 		}
-		$this->raw_input = $input;
-
 		if ($level === 0) {
 			$input = preg_replace('/:&quot;(.*?)&quot;/', ':"\1"', $input);
 			if (!is_string($input)) {
@@ -34,9 +32,13 @@ class FreshRSS_BooleanSearch {
 				return;
 			}
 
-			$input = $this->parseUserQueryNames($input);
-			$input = $this->parseUserQueryIds($input);
+			$input = $this->parseUserQueryNames($input, $allowUserQueries);
+			$input = $this->parseUserQueryIds($input, $allowUserQueries);
+			$input = trim($input);
 		}
+		$this->raw_input = $input;
+
+		$input = self::consistentOrParentheses($input);
 
 		// Either parse everything as a series of BooleanSearch’s combined by implicit AND
 		// or parse everything as a series of Search’s combined by explicit OR
@@ -46,11 +48,10 @@ class FreshRSS_BooleanSearch {
 	/**
 	 * Parse the user queries (saved searches) by name and expand them in the input string.
 	 */
-	private function parseUserQueryNames(string $input): string {
+	private function parseUserQueryNames(string $input, bool $allowUserQueries = true): string {
 		$all_matches = [];
 		if (preg_match_all('/\bsearch:(?P<delim>[\'"])(?P<search>.*)(?P=delim)/U', $input, $matchesFound)) {
 			$all_matches[] = $matchesFound;
-
 		}
 		if (preg_match_all('/\bsearch:(?P<search>[^\s"]*)/', $input, $matchesFound)) {
 			$all_matches[] = $matchesFound;
@@ -60,7 +61,7 @@ class FreshRSS_BooleanSearch {
 			/** @var array<string,FreshRSS_UserQuery> */
 			$queries = [];
 			foreach (FreshRSS_Context::userConf()->queries as $raw_query) {
-				$query = new FreshRSS_UserQuery($raw_query);
+				$query = new FreshRSS_UserQuery($raw_query, FreshRSS_Context::categories(), FreshRSS_Context::labels());
 				$queries[$query->getName()] = $query;
 			}
 
@@ -74,7 +75,11 @@ class FreshRSS_BooleanSearch {
 					$name = trim($matches['search'][$i]);
 					if (!empty($queries[$name])) {
 						$fromS[] = $matches[0][$i];
-						$toS[] = '(' . trim($queries[$name]->getSearch()->getRawInput()) . ')';
+						if ($allowUserQueries) {
+							$toS[] = '(' . trim($queries[$name]->getSearch()->getRawInput()) . ')';
+						} else {
+							$toS[] = '';
+						}
 					}
 				}
 			}
@@ -87,7 +92,7 @@ class FreshRSS_BooleanSearch {
 	/**
 	 * Parse the user queries (saved searches) by ID and expand them in the input string.
 	 */
-	private function parseUserQueryIds(string $input): string {
+	private function parseUserQueryIds(string $input, bool $allowUserQueries = true): string {
 		$all_matches = [];
 
 		if (preg_match_all('/\bS:(?P<search>\d+)/', $input, $matchesFound)) {
@@ -95,14 +100,10 @@ class FreshRSS_BooleanSearch {
 		}
 
 		if (!empty($all_matches)) {
-			$category_dao = FreshRSS_Factory::createCategoryDao();
-			$feed_dao = FreshRSS_Factory::createFeedDao();
-			$tag_dao = FreshRSS_Factory::createTagDao();
-
 			/** @var array<string,FreshRSS_UserQuery> */
 			$queries = [];
 			foreach (FreshRSS_Context::userConf()->queries as $raw_query) {
-				$query = new FreshRSS_UserQuery($raw_query, $feed_dao, $category_dao, $tag_dao);
+				$query = new FreshRSS_UserQuery($raw_query, FreshRSS_Context::categories(), FreshRSS_Context::labels());
 				$queries[] = $query;
 			}
 
@@ -117,7 +118,11 @@ class FreshRSS_BooleanSearch {
 					$id = (int)(trim($matches['search'][$i])) - 1;
 					if (!empty($queries[$id])) {
 						$fromS[] = $matches[0][$i];
-						$toS[] = '(' . trim($queries[$id]->getSearch()->getRawInput()) . ')';
+						if ($allowUserQueries) {
+							$toS[] = '(' . trim($queries[$id]->getSearch()->getRawInput()) . ')';
+						} else {
+							$toS[] = '';
+						}
 					}
 				}
 			}
@@ -125,6 +130,107 @@ class FreshRSS_BooleanSearch {
 			$input = str_replace($fromS, $toS, $input);
 		}
 		return $input;
+	}
+
+	/**
+	 * Example: 'ab cd OR ef OR "gh ij"' becomes '(ab cd) OR (ef) OR ("gh ij")'
+	 */
+	public static function addOrParentheses(string $input): string {
+		$input = trim($input);
+		if ($input === '') {
+			return '';
+		}
+		$splits = preg_split('/\b(OR)\b/i', $input, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+		$ns = count($splits);
+		if ($ns <= 1) {
+			return $input;
+		}
+		$result = '';
+		$segment = '';
+		for ($i = 0; $i < $ns; $i++) {
+			$segment .= $splits[$i];
+			if (trim($segment) === '') {
+				$segment = '';
+			} elseif (strcasecmp($segment, 'OR') === 0) {
+				$result .= $segment . ' ';
+				$segment = '';
+			} else {
+				$quotes = substr_count($segment, '"') + substr_count($segment, '&quot;');
+				if ($quotes % 2 === 0) {
+					$segment = trim($segment);
+					if (in_array($segment, ['!', '-'], true)) {
+						$result .= $segment;
+					} else {
+						$result .= '(' . $segment . ') ';
+					}
+					$segment = '';
+				}
+			}
+		}
+		$segment = trim($segment);
+		if (in_array($segment, ['!', '-'], true)) {
+			$result .= $segment;
+		} elseif ($segment !== '') {
+			$result .= '(' . $segment . ')';
+		}
+		return trim($result);
+	}
+
+	/**
+	 * If the query contains a mix of `OR` expressions with and without parentheses,
+	 * then add parentheses to make the query consistent.
+	 * Example: '(ab (cd OR ef)) OR gh OR ij OR (kl)' becomes '(ab ((cd) OR (ef))) OR (gh) OR (ij) OR (kl)'
+	 */
+	public static function consistentOrParentheses(string $input): string {
+		if (!preg_match('/(?<!\\\\)\\(/', $input)) {
+			// No unescaped parentheses in the input
+			return trim($input);
+		}
+		$parenthesesCount = 0;
+		$result = '';
+		$segment = '';
+		$length = strlen($input);
+
+		for ($i = 0; $i < $length; $i++) {
+			$c = $input[$i];
+			$backslashed = $i >= 1 ? $input[$i - 1] === '\\' : false;
+			if (!$backslashed) {
+				if ($c === '(') {
+					if ($parenthesesCount === 0) {
+						if ($segment !== '') {
+							$result = rtrim($result) . ' ' . self::addOrParentheses($segment);
+							$negation = preg_match('/[!-]$/', $result);
+							if (!$negation) {
+								$result .= ' ';
+							}
+							$segment = '';
+						}
+						$c = '';
+					}
+					$parenthesesCount++;
+				} elseif ($c === ')') {
+					$parenthesesCount--;
+					if ($parenthesesCount === 0) {
+						$segment = self::consistentOrParentheses($segment);
+						if ($segment !== '') {
+							$result .= '(' . $segment . ')';
+							$segment = '';
+						}
+						$c = '';
+					}
+				}
+			}
+			$segment .= $c;
+		}
+		if (trim($segment) !== '') {
+			$result = rtrim($result);
+			$negation = preg_match('/[!-]$/', $segment);
+			if (!$negation) {
+				$result .= ' ';
+			}
+			$result .= self::addOrParentheses($segment);
+		}
+		return trim($result);
 	}
 
 	/** @return bool True if some parenthesis logic took over, false otherwise */
@@ -143,9 +249,14 @@ class FreshRSS_BooleanSearch {
 				$hasParenthesis = true;
 
 				$before = trim($before);
-				if (preg_match('/[!-]$/i', $before)) {
+				if (preg_match('/[!-]$/', $before)) {
 					// Trim trailing negation
-					$before = substr($before, 0, -1);
+					$before = rtrim($before, ' !-');
+					$isOr = preg_match('/\bOR$/i', $before);
+					if ($isOr) {
+						// Trim trailing OR
+						$before = substr($before, 0, -2);
+					}
 
 					// The text prior to the negation is a BooleanSearch
 					$searchBefore = new FreshRSS_BooleanSearch($before, $level + 1, $nextOperator);
@@ -154,8 +265,8 @@ class FreshRSS_BooleanSearch {
 					}
 					$before = '';
 
-					// The next BooleanSearch will have to be combined with AND NOT instead of default AND
-					$nextOperator = 'AND NOT';
+					// The next BooleanSearch will have to be combined with AND NOT or OR NOT instead of default AND
+					$nextOperator = $isOr ? 'OR NOT' : 'AND NOT';
 				} elseif (preg_match('/\bOR$/i', $before)) {
 					// Trim trailing OR
 					$before = substr($before, 0, -2);
@@ -209,7 +320,7 @@ class FreshRSS_BooleanSearch {
 					$i++;
 				}
 				// $sub = trim($sub);
-				// if ($sub != '') {
+				// if ($sub !== '') {
 				// 	// TODO: Consider throwing an error or warning in case of non-matching parenthesis
 				// }
 			// } elseif ($c === ')') {
@@ -246,12 +357,11 @@ class FreshRSS_BooleanSearch {
 			return;
 		}
 		$splits = preg_split('/\b(OR)\b/i', $input, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
-
 		$segment = '';
 		$ns = count($splits);
 		for ($i = 0; $i < $ns; $i++) {
 			$segment = $segment . $splits[$i];
-			if (trim($segment) == '' || strcasecmp($segment, 'OR') === 0) {
+			if (trim($segment) === '' || strcasecmp($segment, 'OR') === 0) {
 				$segment = '';
 			} else {
 				$quotes = substr_count($segment, '"') + substr_count($segment, '&quot;');
@@ -263,7 +373,7 @@ class FreshRSS_BooleanSearch {
 			}
 		}
 		$segment = trim($segment);
-		if ($segment != '') {
+		if ($segment !== '') {
 			$this->searches[] = new FreshRSS_Search($segment);
 		}
 	}
@@ -277,7 +387,7 @@ class FreshRSS_BooleanSearch {
 		return $this->searches;
 	}
 
-	/** @return 'AND'|'OR'|'AND NOT' depending on how this BooleanSearch should be combined */
+	/** @return 'AND'|'OR'|'AND NOT'|'OR NOT' depending on how this BooleanSearch should be combined */
 	public function operator(): string {
 		return $this->operator;
 	}
@@ -287,6 +397,7 @@ class FreshRSS_BooleanSearch {
 		$this->searches[] = $search;
 	}
 
+	#[\Override]
 	public function __toString(): string {
 		return $this->getRawInput();
 	}
